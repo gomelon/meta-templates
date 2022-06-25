@@ -1,0 +1,82 @@
+{{range $itf := interfaces|filterByMeta "sql:table"}}
+    {{$tableMeta := index ( objectMetaGroup $itf "sql:table" ) 0}}
+
+    {{$sqlPkg := import "database/sql"}}
+    {{$melonPkg := import "github.com/gomelon/melon"}}
+
+    {{/*@formatter:off*/}}
+    {{$decorator := print $itf.Name "Impl"}}
+    type {{$decorator}} struct {
+        _tm *{{$melonPkg}}.SQLTXManager
+    }
+
+    func New{{$decorator}}(_tm *{{$melonPkg}}.SQLTXManager) *{{$decorator}}{
+        return &{{$decorator}}{
+            _tm: _tm,
+        }
+    }
+    {{/*@formatter:on*/}}
+    {{range $method := $itf|interfaceMethods}}
+        {{if $method|hasMeta "sql:select"}}
+            {{$selectMeta := index ( objectMetaGroup $method "sql:select" ) 0}}
+            {{$queryResultType := $method|firstResult|objectType}}
+            {{$queryResultTypeName := $queryResultType|typeName}}
+            {{$hasErrorResult := $method|hasErrorResult}}
+            {{$rowType := $queryResultType|underlyingType}}
+            {{$sql := rewriteSelectStmt $method $tableMeta $selectMeta|multipleLines "" " "}}
+
+            {{if and $hasErrorResult (eq $queryResultTypeName "Pointer" )}}
+                {{/*@formatter:off*/}}
+                func (_d *{{$decorator}}) {{$method|declare}}{
+                    _sql := "{{$sql}}"
+                    _rows, _err := _d._tm.OriginTXOrDB({{$method|firstParam|name}}).
+                        Query(_sql, {{nameArgs $method}})
+
+                    if _err != nil {
+                        return nil, _err
+                    }
+
+                    defer _rows.Close()
+
+                    if !_rows.Next() {
+                        return nil, _rows.Err()
+                    }
+
+                    _po := {{$rowType|typeString}}{}
+                    _err = _rows.Scan({{scanFields $method $tableMeta $selectMeta "_po"}})
+                    return &_po, _err
+                }
+                {{/*@formatter:on*/}}
+            {{else if and $hasErrorResult (eq $queryResultTypeName "Slice")}}
+                {{/*@formatter:off*/}}
+                func (_d *{{$decorator}}) {{$method|declare}}{
+                    _sql := "{{$sql}}"
+                    _rows, _err := _d._tm.OriginTXOrDB({{$method|firstParam|name}}).
+                        Query(_sql, {{nameArgs $method}})
+
+                    if _err != nil {
+                        return nil, _err
+                    }
+
+                    defer _rows.Close()
+
+                    if !_rows.Next() {
+                        return nil, _rows.Err()
+                    }
+
+                    _poList := make({{$queryResultType|typeString}}, 0)
+                    for _rows.Next() {
+                        _po := &{{$rowType|typeString}}{}
+                        _err = _rows.Scan({{scanFields $method $tableMeta $selectMeta "_po"}})
+                            if _err != nil {
+                            return nil, _err
+                        }
+                        _poList = append(_poList, _po)
+                    }
+                    return _poList, nil
+                }
+                {{/*@formatter:on*/}}
+            {{end}}
+        {{end}}
+    {{end}}
+{{end}}
