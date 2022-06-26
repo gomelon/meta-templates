@@ -22,58 +22,57 @@
             {{$queryResultType := $method|firstResult|objectType}}
             {{$queryResultTypeName := $queryResultType|typeName}}
             {{$hasErrorResult := $method|hasErrorResult}}
-            {{$rowType := $queryResultType|underlyingType}}
             {{$sql := rewriteSelectStmt $method $tableMeta $selectMeta|multipleLines "" " "}}
 
-            {{if and $hasErrorResult (eq $queryResultTypeName "Pointer" )}}
+            {{if and $hasErrorResult (or (eq $queryResultTypeName "Pointer") (eq $queryResultTypeName "Basic") )}}
                 {{/*@formatter:off*/}}
                 func (_d *{{$decorator}}) {{$method|declare}}{
                     _sql := "{{$sql}}"
+                    _item := {{$queryResultType|initType}}
                     _rows, _err := _d._tm.OriginTXOrDB({{$method|firstParam|name}}).
                         Query(_sql, {{nameArgs $method}})
 
                     if _err != nil {
-                        return nil, _err
+                        return _item, _err
                     }
 
                     defer _rows.Close()
 
                     if !_rows.Next() {
-                        return nil, _rows.Err()
+                        return _item, _rows.Err()
                     }
 
-                    _po := {{$rowType|typeString}}{}
-                    _err = _rows.Scan({{scanFields $method $tableMeta $selectMeta "_po"}})
-                    return &_po, _err
+                    _err = _rows.Scan({{scanFields $method $tableMeta $selectMeta "_item"}})
+                    return _item, _err
                 }
                 {{/*@formatter:on*/}}
             {{else if and $hasErrorResult (eq $queryResultTypeName "Slice")}}
                 {{/*@formatter:off*/}}
                 func (_d *{{$decorator}}) {{$method|declare}}{
                     _sql := "{{$sql}}"
+                    _items := {{$queryResultType|initType}}
                     _rows, _err := _d._tm.OriginTXOrDB({{$method|firstParam|name}}).
                         Query(_sql, {{nameArgs $method}})
 
                     if _err != nil {
-                        return nil, _err
+                        return _items, _err
                     }
 
                     defer _rows.Close()
 
                     if !_rows.Next() {
-                        return nil, _rows.Err()
+                        return _items, _rows.Err()
                     }
 
-                    _poList := make({{$queryResultType|typeString}}, 0)
                     for _rows.Next() {
-                        _po := &{{$rowType|typeString}}{}
-                        _err = _rows.Scan({{scanFields $method $tableMeta $selectMeta "_po"}})
+                        _item := {{$queryResultType.Elem|initType}}
+                        _err = _rows.Scan({{scanFields $method $tableMeta $selectMeta "_item"}})
                             if _err != nil {
-                            return nil, _err
+                            return _items, _err
                         }
-                        _poList = append(_poList, _po)
+                        _items = append(_items, _item)
                     }
-                    return _poList, nil
+                    return _items, nil
                 }
                 {{/*@formatter:on*/}}
             {{end}}

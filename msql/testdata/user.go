@@ -34,6 +34,8 @@ type UserDao interface {
 	FindById(ctx context.Context, id int64) (*User, error)
 	/*sql:select query="select * from `user` where birthday >= :time"*/
 	FindByBirthdayGte(ctx context.Context /*sql:param ctx*/, time time.Time) ([]*User, error)
+	/*sql:select query="select count(*) as count from `user` where birthday >= :time"*/
+	CountByBirthdayGte(ctx context.Context /*sql:param ctx*/, time time.Time) (int32, error)
 	//FindByName 通过用户名获取用户信息
 	FindByName(ctx context.Context, name string) *User
 	Insert(ctx context.Context, user *User) *User
