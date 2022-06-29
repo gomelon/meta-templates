@@ -1,0 +1,10 @@
+{{range $struct := structs|filterByMeta "aop:interface"}}
+    {{$decorator := print $struct.Name "_AOPInterface"}}
+    type {{$decorator}} interface {
+    {{range $method := $struct|methods}}
+        {{if $method|exported}}
+            {{$method|declare}}
+        {{end}}
+    {{end}}
+    }
+{{end}}
