@@ -22,7 +22,16 @@
             {{$queryResultType := $method|firstResult|objectType}}
             {{$queryResultTypeName := $queryResultType|typeName}}
             {{$hasErrorResult := $method|hasErrorResult}}
+
+            {{if not $hasErrorResult}}
+                {{fail "unsupported method is non-error result,method=%s" $method.String}}
+            {{end}}
+
             {{$sql := rewriteSelectStmt $method $tableMeta $selectMeta|multipleLines "" " "}}
+
+            {{if not ($method|firstParam|objectType|assignableToCtx)}}
+                {{fail "unsupported method is non-context.Context param,method=%s" $method.String}}
+            {{end}}
 
             {{if and $hasErrorResult (or (eq $queryResultTypeName "Pointer") (eq $queryResultTypeName "Basic") )}}
                 {{/*@formatter:off*/}}
