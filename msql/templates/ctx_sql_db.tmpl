@@ -2,7 +2,7 @@
     {{$tableMeta := index ( objectMetaGroup $itf "sql:table" ) 0}}
 
     {{$sqlPkg := import "database/sql"}}
-    {{$melonPkg := import "github.com/gomelon/melon"}}
+    {{$melonPkg := import "github.com/gomelon/melon/data"}}
 
     {{/*@formatter:off*/}}
     {{$decorator := print $itf.Name "Impl"}}

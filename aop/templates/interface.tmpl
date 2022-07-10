@@ -1,5 +1,5 @@
 {{range $struct := structs|filterByMeta "aop:interface"}}
-    {{$decorator := print $struct.Name "_AOPInterface"}}
+    {{$decorator := print $struct.Name "AOPInterface"}}
     type {{$decorator}} interface {
     {{range $method := $struct|methods}}
         {{if $method|exported}}

@@ -53,13 +53,13 @@ func (f *functions) RewriteSelectStmt(method types.Object, table *Table, sel *Se
 	if len(selectColumns) == 1 && selectColumns[0].Alias == "*" {
 		queryResultObject := f.packageParser.FirstResult(method)
 		rowType := f.packageParser.UnderlyingType(queryResultObject.Type())
-		column := selectColumns[0]
 		rowStruct, ok := rowType.Underlying().(*types.Struct)
 		if !ok {
 			panic(fmt.Errorf("query result must a struct when select *, method=[%s],sql=%s",
 				method.String(), sel.Query))
 		}
 
+		column := selectColumns[0]
 		numFields := rowStruct.NumFields()
 		columnNames := make([]string, 0, numFields)
 		for i := 0; i < numFields; i++ {
