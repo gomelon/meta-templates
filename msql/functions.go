@@ -42,7 +42,70 @@ func (f *functions) FuncMap() map[string]any {
 		"rewriteSelectStmt": f.RewriteSelectStmt,
 		"nameArgs":          f.NameArgs,
 		"scanFields":        f.ScanFields,
+		"selectMeta":        f.SelectMeta,
 	}
+}
+
+func (f *functions) SelectMeta(tableMeta *Table, method types.Object) (selectMeta *Select, err error) {
+	metaGroups := f.metaParser.ObjectMetaGroups(method, MetaSqlSelect, MetaSqlInsert, MetaSqlUpdate, MetaSqlDelete)
+	if len(metaGroups) > 1 {
+		return nil, fmt.Errorf("method can not use multiple [%s,%s,%s,%s],method=%s",
+			MetaSqlSelect, MetaSqlInsert, MetaSqlUpdate, MetaSqlDelete, method.String())
+	}
+
+	if len(metaGroups) == 1 {
+		if metaGroups[MetaSqlSelect] == nil {
+			return
+		}
+		selectMetaGroup := metaGroups[MetaSqlSelect]
+		originSelectMeta := selectMetaGroup[0].(*Select)
+		if len(originSelectMeta.Query) > 0 {
+			selectMeta = originSelectMeta
+			return
+		}
+		selectMeta = &Select{
+			Query:     originSelectMeta.Query,
+			Master:    originSelectMeta.Master,
+			Omitempty: originSelectMeta.Omitempty,
+		}
+	}
+
+	parsedQuery, err := f.ruleParser.Parse(method.Name())
+
+	if parsedQuery == nil ||
+		(parsedQuery.Subject() != query.SubjectFind && parsedQuery.Subject() != query.SubjectCount) {
+		if selectMeta != nil {
+			err = fmt.Errorf("can not parse method to query,method=%s, possible reasons is %w",
+				method.String(), err)
+		}
+		return
+	}
+
+	parsedQuery = parsedQuery.With(query.WithTable(query.NewTable(tableMeta.Name)))
+	if parsedQuery.FilterGroup() != nil {
+		otherParams := f.packageParser.Params(method)[1:]
+		namedArgs := make([]string, 0, len(otherParams))
+		for _, param := range otherParams {
+			namedArgs = append(namedArgs, param.Name())
+		}
+		parsedQuery.FilterGroup().FillNamedArgs(namedArgs)
+	}
+
+	sql, err := f.translateQuery(tableMeta, parsedQuery)
+	if err != nil {
+		return nil, err
+	}
+
+	if selectMeta == nil {
+		selectMeta = &Select{
+			Query:     sql,
+			Master:    false,
+			Omitempty: false,
+		}
+	} else {
+		selectMeta.Query = sql
+	}
+	return
 }
 
 func (f *functions) RewriteSelectStmt(method types.Object, table *Table, sel *Select) string {

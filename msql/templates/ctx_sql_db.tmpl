@@ -6,8 +6,8 @@
     {{template "decorator_struct" $structTplParams}}
 
     {{range $method := $itf|interfaceMethods}}
-        {{if $method|hasMeta "sql:select"}}
-            {{$selectMeta := index ( objectMetaGroup $method "sql:select" ) 0}}
+        {{$selectMeta:=selectMeta $tableMeta $method}}
+        {{if $selectMeta}}
             {{$queryResultType := $method|firstResult|objectType}}
             {{$queryResultTypeName := $queryResultType|typeName}}
             {{$hasErrorResult := $method|hasErrorResult}}
