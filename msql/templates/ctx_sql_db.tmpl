@@ -1,21 +1,10 @@
 {{range $itf := interfaces|filterByMeta "sql:table"}}
     {{$tableMeta := index ( objectMetaGroup $itf "sql:table" ) 0}}
 
-    {{$sqlPkg := import "database/sql"}}
-    {{$melonPkg := import "github.com/gomelon/melon/data"}}
-
-    {{/*@formatter:off*/}}
     {{$decorator := print $itf.Name "Impl"}}
-    type {{$decorator}} struct {
-        _tm *{{$melonPkg}}.SQLTXManager
-    }
+    {{$structTplParams:=dict "itf" $itf "tableMeta" $tableMeta "decorator" $decorator}}
+    {{template "decorator_struct" $structTplParams}}
 
-    func New{{$decorator}}(_tm *{{$melonPkg}}.SQLTXManager) *{{$decorator}}{
-        return &{{$decorator}}{
-            _tm: _tm,
-        }
-    }
-    {{/*@formatter:on*/}}
     {{range $method := $itf|interfaceMethods}}
         {{if $method|hasMeta "sql:select"}}
             {{$selectMeta := index ( objectMetaGroup $method "sql:select" ) 0}}
@@ -24,67 +13,95 @@
             {{$hasErrorResult := $method|hasErrorResult}}
 
             {{if not $hasErrorResult}}
-                {{fail "unsupported method is non-error result,method=%s" $method.String}}
+                {{printf "unsupported method has none error result,method=%s" $method.String|fail}}
             {{end}}
 
             {{$sql := rewriteSelectStmt $method $tableMeta $selectMeta|multipleLines "" " "}}
 
             {{if not ($method|firstParam|objectType|assignableToCtx)}}
-                {{fail "unsupported method is non-context.Context param,method=%s" $method.String}}
+                {{printf "unsupported method has none context.Context param,method=%s" $method.String|fail}}
             {{end}}
 
+            {{$methodTplParams:=dict "decorator" $decorator "method" $method "sql" $sql
+            "tableMeta" $tableMeta "queryResultType" $queryResultType "queryResultTypeName" $queryResultTypeName
+            }}
             {{if and $hasErrorResult (or (eq $queryResultTypeName "Pointer") (eq $queryResultTypeName "Basic") )}}
-                {{/*@formatter:off*/}}
-                func (_d *{{$decorator}}) {{$method|declare}}{
-                    _sql := "{{$sql}}"
-                    _item := {{$queryResultType|initType}}
-                    _rows, _err := _d._tm.OriginTXOrDB({{$method|firstParam|name}}).
-                        Query(_sql, {{nameArgs $method}})
-
-                    if _err != nil {
-                        return _item, _err
-                    }
-
-                    defer _rows.Close()
-
-                    if !_rows.Next() {
-                        return _item, _rows.Err()
-                    }
-
-                    _err = _rows.Scan({{scanFields $method $tableMeta $selectMeta "_item"}})
-                    return _item, _err
-                }
-                {{/*@formatter:on*/}}
+                {{template "return_single_err" $methodTplParams}}
             {{else if and $hasErrorResult (eq $queryResultTypeName "Slice")}}
-                {{/*@formatter:off*/}}
-                func (_d *{{$decorator}}) {{$method|declare}}{
-                    _sql := "{{$sql}}"
-                    _items := {{$queryResultType|initType}}
-                    _rows, _err := _d._tm.OriginTXOrDB({{$method|firstParam|name}}).
-                        Query(_sql, {{nameArgs $method}})
-
-                    if _err != nil {
-                        return _items, _err
-                    }
-
-                    defer _rows.Close()
-
-                    if !_rows.Next() {
-                        return _items, _rows.Err()
-                    }
-
-                    for _rows.Next() {
-                        _item := {{$queryResultType.Elem|initType}}
-                        _err = _rows.Scan({{scanFields $method $tableMeta $selectMeta "_item"}})
-                            if _err != nil {
-                            return _items, _err
-                        }
-                        _items = append(_items, _item)
-                    }
-                    return _items, nil
-                }
-                {{/*@formatter:on*/}}
+                {{template "return_slice_err" $methodTplParams}}
             {{end}}
         {{end}}
     {{end}}
+{{end}}
+
+{{define "decorator_struct"}}
+    {{$sqlPkg := import "database/sql"}}
+    {{$melonPkg := import "github.com/gomelon/melon/data"}}
+
+    {{/*@formatter:off*/}}
+type {{.decorator}} struct {
+    _tm *{{$melonPkg}}.SQLTXManager
+}
+
+func New{{.decorator}}(_tm *{{$melonPkg}}.SQLTXManager) *{{.decorator}}{
+    return &{{.decorator}}{
+        _tm: _tm,
+    }
+}
+    {{/*@formatter:on*/}}
+{{end}}
+
+{{define "return_single_err"}}
+    {{/*@formatter:off*/}}
+func (_d *{{.decorator}}) {{.method|declare}}{
+    _sql := "{{.sql}}"
+    _item := {{.queryResultType|initType}}
+    _rows, _err := _d._tm.OriginTXOrDB({{.method|firstParam|name}}).
+        Query(_sql, {{nameArgs .method}})
+
+    if _err != nil {
+        return _item, _err
+    }
+
+    defer _rows.Close()
+
+    if !_rows.Next() {
+        return _item, _rows.Err()
+    }
+
+    _err = _rows.Scan({{scanFields .method .tableMeta .sql "_item"}})
+    return _item, _err
+}
+    {{/*@formatter:on*/}}
+{{end}}
+
+{{define "return_slice_err"}}
+    {{/*@formatter:off*/}}
+func (_d *{{.decorator}}) {{.method|declare}}{
+    _sql := "{{.sql}}"
+    _items := {{.queryResultType|initType}}
+    _rows, _err := _d._tm.OriginTXOrDB({{.method|firstParam|name}}).
+        Query(_sql, {{nameArgs .method}})
+
+    if _err != nil {
+        return _items, _err
+    }
+
+    defer _rows.Close()
+
+    if !_rows.Next() {
+        return _items, _rows.Err()
+    }
+
+    for _rows.Next() {
+        _item := {{.queryResultType.Elem|initType}}
+        _err = _rows.Scan({{scanFields .method .tableMeta .sql "_item"}})
+            if _err != nil {
+            return _items, _err
+        }
+        _items = append(_items, _item)
+    }
+    return _items, nil
+}
+    {{/*@formatter:on*/}}
 {{end}}

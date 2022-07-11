@@ -1,8 +1,12 @@
 package msql
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"github.com/gomelon/melon/data"
+	"github.com/gomelon/melon/data/engine"
+	"github.com/gomelon/melon/data/query"
 	"github.com/gomelon/meta"
 	"github.com/gomelon/meta-templates/msql/parser"
 	"github.com/huandu/xstrings"
@@ -11,6 +15,7 @@ import (
 )
 
 type functions struct {
+	ruleParser     *data.RuleParser
 	packageParser  *meta.PackageParser
 	metaParser     *meta.MetaParser
 	importTracker  meta.ImportTracker
@@ -18,12 +23,18 @@ type functions struct {
 }
 
 func NewFunctions(generator *meta.TemplateGenerator) *functions {
+	useEngines()
 	return &functions{
+		ruleParser:     data.NewRuleParser(),
 		packageParser:  generator.PackageParser(),
 		metaParser:     generator.MetaParser(),
 		importTracker:  generator.ImportTracker(),
-		defaultDialect: "mysql",
+		defaultDialect: "MYSQL",
 	}
+}
+
+func useEngines() {
+	engine.UseMySQL()
 }
 
 func (f *functions) FuncMap() map[string]any {
@@ -74,23 +85,18 @@ func (f *functions) RewriteSelectStmt(method types.Object, table *Table, sel *Se
 	return query
 }
 
-func (f *functions) ScanFields(method types.Object, table *Table, sel *Select, item string) string {
-	dialect := table.Dialect
-	if len(dialect) == 0 {
-		dialect = f.defaultDialect
-	}
+func (f *functions) ScanFields(method types.Object, table *Table, sql string, item string) (string, error) {
+	dialect := f.dialect(table)
 
 	var err error
 
-	query := sel.Query
-	sqlParser, err := parser.New(dialect, query)
+	sqlParser, err := parser.New(dialect, sql)
 	if err != nil {
-		panic(fmt.Errorf("parse sql fail: %w, method=[%s],sql=%s",
-			err, method.String(), sel.Query))
+		return "", fmt.Errorf("parse sql fail: %w, method=[%s],sql=%s", err, method.String(), sql)
 	}
 	columns, err := sqlParser.SelectColumns()
 	if err != nil {
-		panic(fmt.Errorf("parse sql fail: %w", err))
+		return "", fmt.Errorf("parse sql fail: %w", err)
 	}
 
 	queryResultObject := f.packageParser.FirstResult(method)
@@ -105,11 +111,10 @@ func (f *functions) ScanFields(method types.Object, table *Table, sel *Select, i
 	}
 
 	if err != nil {
-		panic(fmt.Errorf("parse sql fail:%w, method=[%s],sql=%s",
-			err, method.String(), sel.Query))
+		return "", fmt.Errorf("parse sql fail:%w, method=[%s],sql=%s", err, method.String(), sql)
 	}
 
-	return result
+	return result, nil
 }
 
 func (f *functions) scanFieldsForBasic(rowType *types.Basic, columns []*parser.Column,
@@ -191,4 +196,23 @@ func (f *functions) connectTableQualifier(tableQualifier, column string) string 
 		return column
 	}
 	return tableQualifier + "." + column
+}
+
+func (f *functions) dialect(table *Table) string {
+	dialect := table.Dialect
+	if len(dialect) == 0 {
+		dialect = f.defaultDialect
+	}
+	return strings.ToUpper(dialect)
+}
+
+func (f *functions) translateQuery(tableMeta *Table, q *query.Query) (sql string, err error) {
+	dialect := f.dialect(tableMeta)
+	dialectEngine := engine.Engines[dialect]
+	if dialectEngine == nil {
+		err = fmt.Errorf("unsupported dialect,dialect=%s", dialect)
+		return
+	}
+	translator := query.NewRDBTranslator(dialectEngine)
+	return translator.Translate(context.Background(), q)
 }

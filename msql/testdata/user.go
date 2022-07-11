@@ -19,7 +19,7 @@ const (
 
 //User 用户信息
 type User struct {
-	ID        int64
+	Id        int64
 	Name      string
 	Gender    Gender
 	Birthday  time.Time
