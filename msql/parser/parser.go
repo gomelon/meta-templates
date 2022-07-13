@@ -20,9 +20,9 @@ type Parser interface {
 }
 
 func New(dialect string, sql string) (p Parser, err error) {
-	dialectUpper := strings.ToUpper(dialect)
-	switch dialectUpper {
-	case "MYSQL":
+	dialectLower := strings.ToLower(dialect)
+	switch dialectLower {
+	case "mysql":
 		p, err = NewMySQL(sql)
 	default:
 		err = fmt.Errorf("sql parser: unsupported dialect %s", dialect)

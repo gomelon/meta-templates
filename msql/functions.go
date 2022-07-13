@@ -7,6 +7,7 @@ import (
 	"github.com/gomelon/melon/data"
 	"github.com/gomelon/melon/data/engine"
 	"github.com/gomelon/melon/data/query"
+	"github.com/gomelon/melon/third_party/sqlx"
 	"github.com/gomelon/meta"
 	"github.com/gomelon/meta-templates/msql/parser"
 	"github.com/huandu/xstrings"
@@ -29,7 +30,7 @@ func NewFunctions(generator *meta.TemplateGenerator) *functions {
 		packageParser:  generator.PackageParser(),
 		metaParser:     generator.MetaParser(),
 		importTracker:  generator.ImportTracker(),
-		defaultDialect: "MYSQL",
+		defaultDialect: "mysql",
 	}
 }
 
@@ -40,7 +41,7 @@ func useEngines() {
 func (f *functions) FuncMap() map[string]any {
 	return map[string]any{
 		"rewriteSelectStmt": f.RewriteSelectStmt,
-		"nameArgs":          f.NameArgs,
+		"queryArgs":         f.QueryArgs,
 		"scanFields":        f.ScanFields,
 		"selectMeta":        f.SelectMeta,
 	}
@@ -77,6 +78,8 @@ func (f *functions) SelectMeta(tableMeta *Table, method types.Object) (selectMet
 		if selectMeta != nil {
 			err = fmt.Errorf("can not parse method to query,method=%s, possible reasons is %w",
 				method.String(), err)
+		} else {
+			err = nil
 		}
 		return
 	}
@@ -108,20 +111,20 @@ func (f *functions) SelectMeta(tableMeta *Table, method types.Object) (selectMet
 	return
 }
 
-func (f *functions) RewriteSelectStmt(method types.Object, table *Table, sel *Select) string {
-	dialect := table.Dialect
-	if len(dialect) == 0 {
-		dialect = f.defaultDialect
-	}
+func (f *functions) RewriteSelectStmt(method types.Object, table *Table, sel *Select) (query string, err error) {
+	dialect := f.dialect(table)
 
-	query := sel.Query
+	query, _, err = f.compileNamedQuery(sel.Query, dialect)
+
 	sqlParser, err := parser.New(dialect, query)
 	if err != nil {
-		panic(fmt.Errorf("parse sql fail: %w", err))
+		err = fmt.Errorf("parse sql fail: %w", err)
+		return
 	}
 	selectColumns, err := sqlParser.SelectColumns()
 	if err != nil {
-		panic(fmt.Errorf("parse sql fail: %w", err))
+		err = fmt.Errorf("parse sql fail: %w", err)
+		return
 	}
 
 	if len(selectColumns) == 1 && selectColumns[0].Alias == "*" {
@@ -129,8 +132,9 @@ func (f *functions) RewriteSelectStmt(method types.Object, table *Table, sel *Se
 		rowType := f.packageParser.UnderlyingType(queryResultObject.Type())
 		rowStruct, ok := rowType.Underlying().(*types.Struct)
 		if !ok {
-			panic(fmt.Errorf("query result must a struct when select *, method=[%s],sql=%s",
-				method.String(), sel.Query))
+			err = fmt.Errorf("parse sql fail: query result must a struct when select *, method=[%s],sql=%s",
+				method.String(), sel.Query)
+			return
 		}
 
 		column := selectColumns[0]
@@ -145,7 +149,7 @@ func (f *functions) RewriteSelectStmt(method types.Object, table *Table, sel *Se
 		selectColumnStr := strings.Join(columnNames, ", ")
 		query = strings.Replace(query, qualifierStarStr, selectColumnStr, 1)
 	}
-	return query
+	return
 }
 
 func (f *functions) ScanFields(method types.Object, table *Table, sql string, item string) (string, error) {
@@ -159,7 +163,7 @@ func (f *functions) ScanFields(method types.Object, table *Table, sql string, it
 	}
 	columns, err := sqlParser.SelectColumns()
 	if err != nil {
-		return "", fmt.Errorf("parse sql fail: %w", err)
+		return "", fmt.Errorf("parse sql fail: %w,method=[%s],sql=%s", err, method.String(), sql)
 	}
 
 	queryResultObject := f.packageParser.FirstResult(method)
@@ -178,6 +182,63 @@ func (f *functions) ScanFields(method types.Object, table *Table, sql string, it
 	}
 
 	return result, nil
+}
+
+func (f *functions) QueryArgs(method types.Object, table *Table, sel *Select) (nameArgsStr string, err error) {
+	dialect := f.dialect(table)
+	_, queryNames, err := f.compileNamedQuery(sel.Query, dialect)
+	if err != nil {
+		return
+	}
+
+	methodParams := f.packageParser.Params(method)
+	var toArgMethodParams []types.Object
+	if len(methodParams) > 0 && f.packageParser.AssignableToCtx(methodParams[0].Type()) {
+		toArgMethodParams = methodParams[1:]
+	} else {
+		toArgMethodParams = methodParams
+	}
+
+	if len(queryNames) == 0 {
+		f.positionArgsStr(toArgMethodParams)
+		return
+	}
+
+	nameArgsStr, err = f.nameArgsStr(queryNames, toArgMethodParams)
+	if err != nil {
+		err = fmt.Errorf("parse sql fail: %w, method=[%s],sql=%s", err, method.String(), sel.Query)
+	}
+	return
+}
+
+func (f *functions) positionArgsStr(toArgsMethodParams []types.Object) string {
+	if len(toArgsMethodParams) == 0 {
+		return ""
+	}
+	argsBuilder := strings.Builder{}
+	argsBuilder.Grow(64)
+	for _, queryName := range toArgsMethodParams {
+		argsBuilder.WriteString(queryName.Name())
+		argsBuilder.WriteRune(',')
+
+	}
+	return argsBuilder.String()
+}
+
+func (f *functions) nameArgsStr(queryNames []string, toArgsMethodParams []types.Object) (string, error) {
+	if len(toArgsMethodParams) != len(queryNames) {
+		err := fmt.Errorf("wrong number of args, want %d got %d", len(queryNames), len(toArgsMethodParams))
+		return "", err
+	}
+
+	argsBuilder := strings.Builder{}
+	argsBuilder.Grow(64)
+	for _, queryName := range queryNames {
+		argsBuilder.WriteString(queryName)
+		argsBuilder.WriteRune(',')
+
+	}
+	return argsBuilder.String(), nil
 }
 
 func (f *functions) scanFieldsForBasic(rowType *types.Basic, columns []*parser.Column,
@@ -219,7 +280,7 @@ func (f *functions) scanFieldsForMultipleColumn(rowType *types.Struct, columns [
 	}
 	for _, column := range columns {
 		if column.Alias == "*" {
-			err = fmt.Errorf("msql: unsupported * mixed with specified fields")
+			err = fmt.Errorf("msql: unsupported * mixed with specified fields query")
 			return
 		}
 		fieldName := xstrings.ToCamelCase(column.Alias)
@@ -235,25 +296,6 @@ func (f *functions) scanFieldsForMultipleColumn(rowType *types.Struct, columns [
 	return
 }
 
-func (f *functions) NameArgs(method types.Object) string {
-	sqlPkg := f.importTracker.Import("database/sql")
-	otherParams := f.packageParser.Params(method)[1:]
-	nameArgs := strings.Builder{}
-
-	for i, param := range otherParams {
-		nameArgs.WriteString(sqlPkg)
-		nameArgs.WriteString(".Named(\"")
-		nameArgs.WriteString(param.Name())
-		nameArgs.WriteString("\",")
-		nameArgs.WriteString(param.Name())
-		nameArgs.WriteString("), ")
-		if (i+1)%3 == 0 {
-			nameArgs.WriteRune('\n')
-		}
-	}
-	return nameArgs.String()
-}
-
 func (f *functions) connectTableQualifier(tableQualifier, column string) string {
 	if len(tableQualifier) == 0 {
 		return column
@@ -266,7 +308,7 @@ func (f *functions) dialect(table *Table) string {
 	if len(dialect) == 0 {
 		dialect = f.defaultDialect
 	}
-	return strings.ToUpper(dialect)
+	return strings.ToLower(dialect)
 }
 
 func (f *functions) translateQuery(tableMeta *Table, q *query.Query) (sql string, err error) {
@@ -278,4 +320,14 @@ func (f *functions) translateQuery(tableMeta *Table, q *query.Query) (sql string
 	}
 	translator := query.NewRDBTranslator(dialectEngine)
 	return translator.Translate(context.Background(), q)
+}
+
+func (f *functions) compileNamedQuery(namedQuery, dialect string) (query string, names []string, err error) {
+	bindType := sqlx.BindType(dialect)
+	if bindType == 0 {
+		err = fmt.Errorf("unsupported dialect,dialect=%s", dialect)
+		return
+	}
+	query, names, err = sqlx.CompileNamedQuery([]byte(namedQuery), bindType)
+	return
 }

@@ -23,7 +23,8 @@
             {{end}}
 
             {{$methodTplParams:=dict "decorator" $decorator "method" $method "sql" $sql
-            "tableMeta" $tableMeta "queryResultType" $queryResultType "queryResultTypeName" $queryResultTypeName
+            "tableMeta" $tableMeta "selectMeta" $selectMeta "queryResultType" $queryResultType
+            "queryResultTypeName" $queryResultTypeName
             }}
             {{if and $hasErrorResult (or (eq $queryResultTypeName "Pointer") (eq $queryResultTypeName "Basic") )}}
                 {{template "return_single_err" $methodTplParams}}
@@ -53,11 +54,11 @@ func New{{.decorator}}(_tm *{{$melonPkg}}.SQLTXManager) *{{.decorator}}{
 
 {{define "return_single_err"}}
     {{/*@formatter:off*/}}
-func (_d *{{.decorator}}) {{.method|declare}}{
+func (_impl *{{.decorator}}) {{.method|declare}}{
     _sql := "{{.sql}}"
     _item := {{.queryResultType|initType}}
-    _rows, _err := _d._tm.OriginTXOrDB({{.method|firstParam|name}}).
-        Query(_sql, {{nameArgs .method}})
+    _rows, _err := _impl._tm.OriginTXOrDB({{.method|firstParam|name}}).
+        Query(_sql, {{queryArgs .method .tableMeta .selectMeta}})
 
     if _err != nil {
         return _item, _err
@@ -77,11 +78,11 @@ func (_d *{{.decorator}}) {{.method|declare}}{
 
 {{define "return_slice_err"}}
     {{/*@formatter:off*/}}
-func (_d *{{.decorator}}) {{.method|declare}}{
+func (_impl *{{.decorator}}) {{.method|declare}}{
     _sql := "{{.sql}}"
     _items := {{.queryResultType|initType}}
-    _rows, _err := _d._tm.OriginTXOrDB({{.method|firstParam|name}}).
-        Query(_sql, {{nameArgs .method}})
+    _rows, _err := _impl._tm.OriginTXOrDB({{.method|firstParam|name}}).
+        Query(_sql, {{queryArgs .method .tableMeta .selectMeta}})
 
     if _err != nil {
         return _items, _err

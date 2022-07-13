@@ -37,10 +37,10 @@ type UserDao interface {
 	/*sql:select query="select count(*) as count from `user` where birthday >= :time"*/
 	CountByBirthdayGte(ctx context.Context /*sql:param ctx*/, time time.Time) (int32, error)
 	//FindByName 通过用户名获取用户信息
-	FindByName(ctx context.Context, name string) *User
-	Insert(ctx context.Context, user *User) *User
-	UpdateById(ctx context.Context, id int64, user *User) int64
-	DeleteById(ctx context.Context, id int64) int64
+	FindByName(ctx context.Context, name string) (*User, error)
+	Insert(ctx context.Context, user *User) (*User, error)
+	UpdateById(ctx context.Context, id int64, user *User) (int64, error)
+	DeleteById(ctx context.Context, id int64) (int64, error)
 }
 
 //AToGender 字符转Gender
