@@ -6,13 +6,22 @@
     {{template "decorator_struct" $structTplParams}}
 
     {{range $method := $itf|interfaceMethods}}
+        {{$hasErrorResult := $method|hasErrorResult}}
+        {{if not $hasErrorResult}}
+            {{printf "unsupported method has none error result,method=%s" .method.String|fail}}
+        {{end}}
+
+        {{if not ($method|firstParam|objectType|assignableToCtx)}}
+            {{printf "unsupported method has none context.Context param,method=%s" .method.String|fail}}
+        {{end}}
+
         {{$methodTplParams:=dict "decorator" $decorator "method" $method "tableMeta" $tableMeta}}
 
         {{$directive := directive $method}}
         {{if eq $directive "sql:select"}}
-            {{$selectMeta := selectMeta $tableMeta $method}}
-            {{$_ := set $methodTplParams "selectMeta" $selectMeta}}
             {{template "select" $methodTplParams}}
+        {{else if eq $directive "sql:delete"}}
+            {{template "delete" $methodTplParams}}
         {{end}}
 
 
@@ -37,25 +46,17 @@ func New{{.decorator}}(_tm *{{$melonPkg}}.SQLTXManager) *{{.decorator}}{
 {{end}}
 
 {{define "select"}}
+    {{$selectMeta := selectMeta .method .tableMeta}}
     {{$queryResultType := .method|firstResult|objectType}}
     {{$queryResultTypeName := $queryResultType|typeName}}
-    {{$hasErrorResult := .method|hasErrorResult}}
 
-    {{if not $hasErrorResult}}
-        {{printf "unsupported method has none error result,method=%s" .method.String|fail}}
-    {{end}}
-
-    {{if not (.method|firstParam|objectType|assignableToCtx)}}
-        {{printf "unsupported method has none context.Context param,method=%s" .method.String|fail}}
-    {{end}}
-
-    {{$sql := rewriteSelectStmt .method .tableMeta .selectMeta}}
-    {{$methodTplParams := dict "decorator" .decorator "method" .method "tableMeta" .tableMeta "selectMeta" .selectMeta
+    {{$sql := rewriteSelectStmt .method .tableMeta $selectMeta}}
+    {{$methodTplParams := dict "decorator" .decorator "method" .method "tableMeta" .tableMeta "selectMeta" $selectMeta
     "sql" $sql "queryResultType" $queryResultType "queryResultTypeName" $queryResultTypeName }}
 
-    {{if and $hasErrorResult (or (eq $queryResultTypeName "Pointer") (eq $queryResultTypeName "Basic") )}}
+    {{if or (eq $queryResultTypeName "Pointer") (eq $queryResultTypeName "Basic") }}
         {{template "select_return_single_err" $methodTplParams}}
-    {{else if and $hasErrorResult (eq $queryResultTypeName "Slice")}}
+    {{else if eq $queryResultTypeName "Slice"}}
         {{template "select_return_slice_err" $methodTplParams}}
     {{end}}
 {{end}}
@@ -112,6 +113,22 @@ func (_impl *{{.decorator}}) {{.method|declare}}{
         _items = append(_items, _item)
     }
     return _items, nil
+}
+    {{/*@formatter:on*/}}
+{{end}}
+
+
+{{define "delete"}}
+    {{$deleteMeta := deleteMeta .method .tableMeta}}
+    {{/*@formatter:off*/}}
+func (_impl *{{.decorator}}) {{.method|declare}}{
+    _sql := {{rewriteDeleteStmt .method .tableMeta $deleteMeta|multipleLines}}
+    _result, err := _impl._tm.OriginTXOrDB({{.method|firstParam|name}}).
+        Exec(_sql, {{queryArgs .method .tableMeta $deleteMeta}})
+    if err != nil {
+        return 0, err
+    }
+    return _result.RowsAffected()
 }
     {{/*@formatter:on*/}}
 {{end}}

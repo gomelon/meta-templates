@@ -64,6 +64,26 @@ func (_impl *UserDaoImpl) CountByBirthdayGTE2(ctx context.Context, time time.Tim
 	return _item, _err
 }
 
+func (_impl *UserDaoImpl) DeleteById(ctx context.Context, id int64) (int64, error) {
+	_sql := "DELETE FROM `user` WHERE (`id` = ?)"
+	_result, err := _impl._tm.OriginTXOrDB(ctx).
+		Exec(_sql, id)
+	if err != nil {
+		return 0, err
+	}
+	return _result.RowsAffected()
+}
+
+func (_impl *UserDaoImpl) DeleteById2(ctx context.Context, id int64) (int64, error) {
+	_sql := "delete from `user` where id = ?"
+	_result, err := _impl._tm.OriginTXOrDB(ctx).
+		Exec(_sql, id)
+	if err != nil {
+		return 0, err
+	}
+	return _result.RowsAffected()
+}
+
 func (_impl *UserDaoImpl) ExistsById(ctx context.Context, id int64) (bool, error) {
 	_sql := "SELECT 1 AS X FROM `user` WHERE (`id` = ?) LIMIT 0, 1"
 	_rows, _err := _impl._tm.OriginTXOrDB(ctx).

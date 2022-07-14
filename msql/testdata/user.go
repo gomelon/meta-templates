@@ -57,9 +57,10 @@ type UserDao interface {
 	//sql:none
 	UpdateById(ctx context.Context, id int64, user *User) (int64, error)
 
-	//DeleteById
-	//sql:none
 	DeleteById(ctx context.Context, id int64) (int64, error)
+
+	/*sql:delete query="delete from `user` where id = :id"*/
+	DeleteById2(ctx context.Context, id int64) (int64, error)
 }
 
 //AToGender 字符转Gender

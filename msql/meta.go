@@ -33,6 +33,10 @@ func (t *Table) Repeatable() bool {
 	return false
 }
 
+type Querier interface {
+	GetQuery() string
+}
+
 type Select struct {
 	Query     string `json:"query,omitempty"`
 	Master    bool   `json:"master,omitempty,string"`
@@ -49,6 +53,10 @@ func (q *Select) Directive() string {
 
 func (q *Select) Repeatable() bool {
 	return false
+}
+
+func (q *Select) GetQuery() string {
+	return q.Query
 }
 
 type Insert struct {
@@ -68,6 +76,10 @@ func (q *Insert) Repeatable() bool {
 	return false
 }
 
+func (q *Insert) GetQuery() string {
+	return q.Query
+}
+
 type Update struct {
 	Query     string `json:"query,omitempty"`
 	Omitempty bool   `json:"omitempty,omitempty"`
@@ -85,9 +97,12 @@ func (q *Update) Repeatable() bool {
 	return false
 }
 
+func (q *Update) GetQuery() string {
+	return q.Query
+}
+
 type Delete struct {
-	Query     string `json:"query,omitempty"`
-	Omitempty bool   `json:"omitempty,omitempty"`
+	Query string `json:"query,omitempty"`
 }
 
 func (q *Delete) PlaceAt() meta.Place {
@@ -100,6 +115,10 @@ func (q *Delete) Directive() string {
 
 func (q *Delete) Repeatable() bool {
 	return false
+}
+
+func (q *Delete) GetQuery() string {
+	return q.Query
 }
 
 type None struct {

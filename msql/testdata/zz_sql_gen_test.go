@@ -20,19 +20,28 @@ func TestCRUD(t *testing.T) {
 	var userDao UserDao = NewUserDaoImpl(tm)
 
 	// execute
-	user := &User{
-		Name:     "GoMelon",
+	var err error
+	ctx := context.Background()
+	user1 := &User{
+		Name:     "GoMelon1",
 		Gender:   0,
 		Birthday: time.Now(),
 	}
-	ctx := context.Background()
-	user, err := userDao.Insert(ctx, user)
+
+	user1, err = userDao.Insert(ctx, user1)
+
+	user2 := &User{
+		Name:     "GoMelon2",
+		Gender:   0,
+		Birthday: time.Now(),
+	}
+	user2, err = userDao.Insert(ctx, user2)
 	a.NoError(err, "Insert fail")
-	a.Greater(user.Id, int64(0), "insert then get id fail")
+	a.Greater(user1.Id, int64(0), "insert then get id fail")
 
 	// -------------------------- Find Single Start --------------------------
 
-	foundUser, err := userDao.FindById(ctx, user.Id)
+	foundUser, err := userDao.FindById(ctx, user1.Id)
 	a.NoError(err, "FindById fail")
 	a.NotNil(foundUser, "FindById fail")
 	a.NotEmptyf(foundUser.Name, "FindById fail,Name is Empty")
@@ -41,7 +50,7 @@ func TestCRUD(t *testing.T) {
 	a.NoError(err, "FindById fail")
 	a.Nil(foundUser, "FindById fail")
 
-	foundUser, err = userDao.FindById2(ctx, user.Id)
+	foundUser, err = userDao.FindById2(ctx, user1.Id)
 	a.NoError(err, "FindById2 fail")
 	a.NotNil(foundUser, "FindById2 fail")
 	a.NotEmptyf(foundUser.Name, "FindById2 fail,Name is Empty")
@@ -76,7 +85,7 @@ func TestCRUD(t *testing.T) {
 
 	// -------------------------- Exists Start --------------------------
 
-	found, err := userDao.ExistsById(ctx, user.Id)
+	found, err := userDao.ExistsById(ctx, user1.Id)
 	a.NoError(err, "ExistsById fail")
 	a.True(found, "ExistsById fail")
 
@@ -84,7 +93,7 @@ func TestCRUD(t *testing.T) {
 	a.NoError(err, "ExistsById fail")
 	a.False(found, "ExistsById fail")
 
-	found, err = userDao.ExistsById2(ctx, user.Id)
+	found, err = userDao.ExistsById2(ctx, user1.Id)
 	a.NoError(err, "ExistsById2 fail")
 	a.True(found, "ExistsById2 fail")
 
@@ -114,11 +123,23 @@ func TestCRUD(t *testing.T) {
 
 	// -------------------------- Count End   --------------------------
 
-	// clean
-	_, err = userDao.DeleteById(ctx, user.Id)
-	if err != nil {
-		panic(err)
-	}
+	// -------------------------- Delete Start --------------------------
+	deleteCount, err := userDao.DeleteById(ctx, user1.Id)
+	a.NoError(err, "DeleteById fail")
+	a.Greater(deleteCount, int64(0), "DeleteById fail")
+
+	deleteCount, err = userDao.DeleteById(ctx, math.MaxInt64)
+	a.NoError(err, "DeleteById fail")
+	a.Equal(deleteCount, int64(0), "DeleteById fail")
+
+	deleteCount, err = userDao.DeleteById2(ctx, user2.Id)
+	a.NoError(err, "DeleteById2 fail")
+	a.Greater(deleteCount, int64(0), "DeleteById2 fail")
+
+	deleteCount, err = userDao.DeleteById2(ctx, math.MaxInt64)
+	a.NoError(err, "DeleteById2 fail")
+	a.Equal(deleteCount, int64(0), "DeleteById2 fail")
+	// -------------------------- Delete End   --------------------------
 }
 
 func TestTransactionRollback(t *testing.T) {
@@ -194,12 +215,5 @@ func (_impl *UserDaoImpl) UpdateById(ctx context.Context, id int64, user *User) 
 		"WHERE `id` = ?"
 	db := _impl._tm.OriginTXOrDB(ctx)
 	result, _ := db.Exec(query, user.Name, user.Gender, user.Birthday, id)
-	return result.RowsAffected()
-}
-
-func (_impl *UserDaoImpl) DeleteById(ctx context.Context, id int64) (int64, error) {
-	query := "DELETE FROM `user` WHERE `id` = ?"
-	db := _impl._tm.OriginTXOrDB(ctx)
-	result, _ := db.Exec(query, id)
 	return result.RowsAffected()
 }

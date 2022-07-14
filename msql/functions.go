@@ -40,11 +40,13 @@ func useEngines() {
 
 func (f *functions) FuncMap() map[string]any {
 	return map[string]any{
-		"rewriteSelectStmt": f.RewriteSelectStmt,
-		"queryArgs":         f.QueryArgs,
 		"directive":         f.Directive,
-		"scanFields":        f.ScanFields,
 		"selectMeta":        f.SelectMeta,
+		"rewriteSelectStmt": f.RewriteSelectStmt,
+		"scanFields":        f.ScanFields,
+		"deleteMeta":        f.DeleteMeta,
+		"rewriteDeleteStmt": f.RewriteDeleteStmt,
+		"queryArgs":         f.QueryArgs,
 	}
 }
 
@@ -71,17 +73,15 @@ func (f *functions) Directive(method types.Object) (directive string, err error)
 	return
 }
 
-func (f *functions) SelectMeta(tableMeta *Table, method types.Object) (selectMeta *Select, err error) {
+func (f *functions) SelectMeta(method types.Object, tableMeta *Table) (selectMeta *Select, err error) {
 	directive, selectMetaGroup, err := f.subjectMeta(method)
-	if err != nil {
+	if err != nil || (len(directive) > 0 && directive != MetaSqlSelect) {
 		return
 	}
 
-	if len(directive) > 0 && directive != MetaSqlSelect {
-		return
-	}
-
-	if selectMetaGroup != nil {
+	if selectMetaGroup == nil {
+		selectMeta = &Select{}
+	} else {
 		originSelectMeta := selectMetaGroup[0].(*Select)
 		if len(originSelectMeta.Query) > 0 {
 			selectMeta = originSelectMeta
@@ -95,7 +95,6 @@ func (f *functions) SelectMeta(tableMeta *Table, method types.Object) (selectMet
 	}
 
 	parsedQuery, err := f.ruleParser.Parse(method.Name())
-
 	if parsedQuery == nil ||
 		(parsedQuery.Subject() != query.SubjectFind &&
 			parsedQuery.Subject() != query.SubjectCount &&
@@ -111,9 +110,9 @@ func (f *functions) SelectMeta(tableMeta *Table, method types.Object) (selectMet
 
 	parsedQuery = parsedQuery.With(query.WithTable(query.NewTable(tableMeta.Name)))
 	if parsedQuery.FilterGroup() != nil {
-		otherParams := f.packageParser.Params(method)[1:]
-		namedArgs := make([]string, 0, len(otherParams))
-		for _, param := range otherParams {
+		toArgMethodParams := f.methodParamsWithoutCtx(method)
+		namedArgs := make([]string, 0, len(toArgMethodParams))
+		for _, param := range toArgMethodParams {
 			namedArgs = append(namedArgs, param.Name())
 		}
 		err = parsedQuery.FilterGroup().FillNamedArgs(namedArgs)
@@ -124,18 +123,10 @@ func (f *functions) SelectMeta(tableMeta *Table, method types.Object) (selectMet
 
 	sql, err := f.translateQuery(tableMeta, parsedQuery)
 	if err != nil {
-		return nil, err
+		return
 	}
 
-	if selectMeta == nil {
-		selectMeta = &Select{
-			Query:     sql,
-			Master:    false,
-			Omitempty: false,
-		}
-	} else {
-		selectMeta.Query = sql
-	}
+	selectMeta.Query = sql
 	return
 }
 
@@ -180,6 +171,64 @@ func (f *functions) RewriteSelectStmt(method types.Object, table *Table, sel *Se
 	return
 }
 
+func (f *functions) DeleteMeta(method types.Object, tableMeta *Table) (deleteMeta *Delete, err error) {
+	directive, deleteMetaGroup, err := f.subjectMeta(method)
+	if err != nil || (len(directive) > 0 && directive != MetaSqlDelete) {
+		return
+	}
+
+	if deleteMetaGroup == nil {
+		deleteMeta = &Delete{}
+	} else {
+		originDeleteMeta := deleteMetaGroup[0].(*Delete)
+		if len(originDeleteMeta.Query) > 0 {
+			deleteMeta = originDeleteMeta
+			return
+		}
+		deleteMeta = &Delete{
+			Query: originDeleteMeta.Query,
+		}
+	}
+
+	parsedQuery, err := f.ruleParser.Parse(method.Name())
+	if parsedQuery == nil || parsedQuery.Subject() != query.SubjectDelete {
+		if deleteMeta != nil {
+			err = fmt.Errorf("can not parse method to query,method=%s, possible reasons is %w",
+				method.String(), err)
+		} else {
+			err = nil
+		}
+		return
+	}
+
+	parsedQuery = parsedQuery.With(query.WithTable(query.NewTable(tableMeta.Name)))
+	if parsedQuery.FilterGroup() != nil {
+		toArgMethodParams := f.methodParamsWithoutCtx(method)
+		namedArgs := make([]string, 0, len(toArgMethodParams))
+		for _, param := range toArgMethodParams {
+			namedArgs = append(namedArgs, param.Name())
+		}
+		err = parsedQuery.FilterGroup().FillNamedArgs(namedArgs)
+		if err != nil {
+			return
+		}
+	}
+
+	sql, err := f.translateQuery(tableMeta, parsedQuery)
+	if err != nil {
+		return
+	}
+
+	deleteMeta.Query = sql
+	return
+}
+
+func (f *functions) RewriteDeleteStmt(_ types.Object, table *Table, q Querier) (query string, err error) {
+	dialect := f.dialect(table)
+	query, _, err = f.compileNamedQuery(q.GetQuery(), dialect)
+	return
+}
+
 func (f *functions) ScanFields(method types.Object, table *Table, sql string, item string) (string, error) {
 	dialect := f.dialect(table)
 
@@ -212,21 +261,14 @@ func (f *functions) ScanFields(method types.Object, table *Table, sql string, it
 	return result, nil
 }
 
-func (f *functions) QueryArgs(method types.Object, table *Table, sel *Select) (nameArgsStr string, err error) {
+func (f *functions) QueryArgs(method types.Object, table *Table, q Querier) (nameArgsStr string, err error) {
 	dialect := f.dialect(table)
-	_, queryNames, err := f.compileNamedQuery(sel.Query, dialect)
+	_, queryNames, err := f.compileNamedQuery(q.GetQuery(), dialect)
 	if err != nil {
 		return
 	}
 
-	methodParams := f.packageParser.Params(method)
-	var toArgMethodParams []types.Object
-	if len(methodParams) > 0 && f.packageParser.AssignableToCtx(methodParams[0].Type()) {
-		toArgMethodParams = methodParams[1:]
-	} else {
-		toArgMethodParams = methodParams
-	}
-
+	toArgMethodParams := f.methodParamsWithoutCtx(method)
 	if len(queryNames) == 0 {
 		f.positionArgsStr(toArgMethodParams)
 		return
@@ -234,7 +276,7 @@ func (f *functions) QueryArgs(method types.Object, table *Table, sel *Select) (n
 
 	nameArgsStr, err = f.nameArgsStr(queryNames, toArgMethodParams)
 	if err != nil {
-		err = fmt.Errorf("parse sql fail: %w, method=[%s],sql=%s", err, method.String(), sel.Query)
+		err = fmt.Errorf("parse sql fail: %w, method=[%s],sql=%s", err, method.String(), q.GetQuery())
 	}
 	return
 }
@@ -269,7 +311,7 @@ func (f *functions) nameArgsStr(queryNames []string, toArgsMethodParams []types.
 	return argsBuilder.String(), nil
 }
 
-func (f *functions) scanFieldsForBasic(rowType *types.Basic, columns []*parser.Column,
+func (f *functions) scanFieldsForBasic(_ *types.Basic, columns []*parser.Column,
 	item string) (string, error) {
 	if len(columns) > 1 || columns[0].Alias == "*" {
 		return "", errors.New("when the query result is a basic type, select must be a specified field")
@@ -372,4 +414,15 @@ func (f *functions) subjectMeta(method types.Object) (directive string, group me
 		}
 	}
 	return
+}
+
+func (f *functions) methodParamsWithoutCtx(method types.Object) []types.Object {
+	methodParams := f.packageParser.Params(method)
+	var toArgMethodParams []types.Object
+	if len(methodParams) > 0 && f.packageParser.AssignableToCtx(methodParams[0].Type()) {
+		toArgMethodParams = methodParams[1:]
+	} else {
+		toArgMethodParams = methodParams
+	}
+	return toArgMethodParams
 }
