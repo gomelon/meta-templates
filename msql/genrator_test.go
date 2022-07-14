@@ -12,7 +12,7 @@ func TestTemplateGen(t *testing.T) {
 
 	workdir, _ := os.Getwd()
 	path := workdir + "/testdata"
-	generator, err := meta.NewTemplateGenerator(path, templates.NestSqlDB, meta.WithMetas(AllMetas()),
+	generator, err := meta.NewTemplateGenerator(path, templates.NestSqlDB, meta.WithMetas(Metas),
 		meta.WithFuncMapProvider(func(generator *meta.TemplateGenerator) map[string]any {
 			return NewFunctions(generator).FuncMap()
 		}))

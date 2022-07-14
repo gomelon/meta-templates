@@ -6,32 +6,16 @@
     {{template "decorator_struct" $structTplParams}}
 
     {{range $method := $itf|interfaceMethods}}
-        {{$selectMeta:=selectMeta $tableMeta $method}}
-        {{if $selectMeta}}
-            {{$queryResultType := $method|firstResult|objectType}}
-            {{$queryResultTypeName := $queryResultType|typeName}}
-            {{$hasErrorResult := $method|hasErrorResult}}
+        {{$methodTplParams:=dict "decorator" $decorator "method" $method "tableMeta" $tableMeta}}
 
-            {{if not $hasErrorResult}}
-                {{printf "unsupported method has none error result,method=%s" $method.String|fail}}
-            {{end}}
-
-            {{$sql := rewriteSelectStmt $method $tableMeta $selectMeta|multipleLines "" " "}}
-
-            {{if not ($method|firstParam|objectType|assignableToCtx)}}
-                {{printf "unsupported method has none context.Context param,method=%s" $method.String|fail}}
-            {{end}}
-
-            {{$methodTplParams:=dict "decorator" $decorator "method" $method "sql" $sql
-            "tableMeta" $tableMeta "selectMeta" $selectMeta "queryResultType" $queryResultType
-            "queryResultTypeName" $queryResultTypeName
-            }}
-            {{if and $hasErrorResult (or (eq $queryResultTypeName "Pointer") (eq $queryResultTypeName "Basic") )}}
-                {{template "return_single_err" $methodTplParams}}
-            {{else if and $hasErrorResult (eq $queryResultTypeName "Slice")}}
-                {{template "return_slice_err" $methodTplParams}}
-            {{end}}
+        {{$directive := directive $method}}
+        {{if eq $directive "sql:select"}}
+            {{$selectMeta := selectMeta $tableMeta $method}}
+            {{$_ := set $methodTplParams "selectMeta" $selectMeta}}
+            {{template "select" $methodTplParams}}
         {{end}}
+
+
     {{end}}
 {{end}}
 
@@ -52,14 +36,38 @@ func New{{.decorator}}(_tm *{{$melonPkg}}.SQLTXManager) *{{.decorator}}{
     {{/*@formatter:on*/}}
 {{end}}
 
-{{define "return_single_err"}}
+{{define "select"}}
+    {{$queryResultType := .method|firstResult|objectType}}
+    {{$queryResultTypeName := $queryResultType|typeName}}
+    {{$hasErrorResult := .method|hasErrorResult}}
+
+    {{if not $hasErrorResult}}
+        {{printf "unsupported method has none error result,method=%s" .method.String|fail}}
+    {{end}}
+
+    {{if not (.method|firstParam|objectType|assignableToCtx)}}
+        {{printf "unsupported method has none context.Context param,method=%s" .method.String|fail}}
+    {{end}}
+
+    {{$sql := rewriteSelectStmt .method .tableMeta .selectMeta}}
+    {{$methodTplParams := dict "decorator" .decorator "method" .method "tableMeta" .tableMeta "selectMeta" .selectMeta
+    "sql" $sql "queryResultType" $queryResultType "queryResultTypeName" $queryResultTypeName }}
+
+    {{if and $hasErrorResult (or (eq $queryResultTypeName "Pointer") (eq $queryResultTypeName "Basic") )}}
+        {{template "select_return_single_err" $methodTplParams}}
+    {{else if and $hasErrorResult (eq $queryResultTypeName "Slice")}}
+        {{template "select_return_slice_err" $methodTplParams}}
+    {{end}}
+{{end}}
+
+{{define "select_return_single_err"}}
     {{/*@formatter:off*/}}
 func (_impl *{{.decorator}}) {{.method|declare}}{
-    _sql := "{{.sql}}"
-    _item := {{.queryResultType|initType}}
+    _sql := {{multipleLines .sql}}
     _rows, _err := _impl._tm.OriginTXOrDB({{.method|firstParam|name}}).
-        Query(_sql, {{queryArgs .method .tableMeta .selectMeta}})
+    Query(_sql, {{queryArgs .method .tableMeta .selectMeta}})
 
+    var _item {{.queryResultType|typeString}}
     if _err != nil {
         return _item, _err
     }
@@ -70,20 +78,21 @@ func (_impl *{{.decorator}}) {{.method|declare}}{
         return _item, _rows.Err()
     }
 
+    _item = {{.queryResultType|initType}}
     _err = _rows.Scan({{scanFields .method .tableMeta .sql "_item"}})
     return _item, _err
 }
     {{/*@formatter:on*/}}
 {{end}}
 
-{{define "return_slice_err"}}
+{{define "select_return_slice_err"}}
     {{/*@formatter:off*/}}
 func (_impl *{{.decorator}}) {{.method|declare}}{
-    _sql := "{{.sql}}"
-    _items := {{.queryResultType|initType}}
+    _sql := {{multipleLines .sql}}
     _rows, _err := _impl._tm.OriginTXOrDB({{.method|firstParam|name}}).
         Query(_sql, {{queryArgs .method .tableMeta .selectMeta}})
 
+    var _items {{.queryResultType|typeString}}
     if _err != nil {
         return _items, _err
     }

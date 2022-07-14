@@ -3,7 +3,9 @@ module github.com/gomelon/meta-templates
 go 1.18
 
 require (
+	github.com/gomelon/melon v0.0.0-20220713153152-6f9648a5adf1
 	github.com/gomelon/meta v0.0.0-20220614140214-72e26c834855
+	github.com/huandu/xstrings v1.3.1
 	github.com/xwb1989/sqlparser v0.0.0-20180606152119-120387863bf2
 )
 
@@ -13,7 +15,6 @@ require (
 	github.com/Masterminds/sprig/v3 v3.2.2 // indirect
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
 	github.com/google/uuid v1.1.1 // indirect
-	github.com/huandu/xstrings v1.3.1 // indirect
 	github.com/imdario/mergo v0.3.11 // indirect
 	github.com/mitchellh/copystructure v1.0.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.0 // indirect

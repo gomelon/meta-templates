@@ -8,11 +8,13 @@ const (
 	MetaSqlInsert = "sql:insert"
 	MetaSqlUpdate = "sql:update"
 	MetaSqlDelete = "sql:delete"
+	MetaSqlNone   = "sql:none"
 )
 
-func AllMetas() []meta.Meta {
-	return []meta.Meta{&Table{}, &Select{}, &Insert{}, &Update{}, &Delete{}}
-}
+var (
+	Metas      = []meta.Meta{&Table{}, &Select{}, &Insert{}, &Update{}, &Delete{}, &None{}}
+	Directives = []string{MetaSqlSelect, MetaSqlInsert, MetaSqlUpdate, MetaSqlDelete, MetaSqlNone}
+)
 
 type Table struct {
 	Name    string `json:"name"`
@@ -97,5 +99,20 @@ func (q *Delete) Directive() string {
 }
 
 func (q *Delete) Repeatable() bool {
+	return false
+}
+
+type None struct {
+}
+
+func (q *None) PlaceAt() meta.Place {
+	return meta.PlaceInterfaceMethod
+}
+
+func (q *None) Directive() string {
+	return MetaSqlNone
+}
+
+func (q *None) Repeatable() bool {
 	return false
 }

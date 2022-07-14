@@ -42,23 +42,46 @@ func (f *functions) FuncMap() map[string]any {
 	return map[string]any{
 		"rewriteSelectStmt": f.RewriteSelectStmt,
 		"queryArgs":         f.QueryArgs,
+		"directive":         f.Directive,
 		"scanFields":        f.ScanFields,
 		"selectMeta":        f.SelectMeta,
 	}
 }
 
-func (f *functions) SelectMeta(tableMeta *Table, method types.Object) (selectMeta *Select, err error) {
-	metaGroups := f.metaParser.ObjectMetaGroups(method, MetaSqlSelect, MetaSqlInsert, MetaSqlUpdate, MetaSqlDelete)
-	if len(metaGroups) > 1 {
-		return nil, fmt.Errorf("method can not use multiple [%s,%s,%s,%s],method=%s",
-			MetaSqlSelect, MetaSqlInsert, MetaSqlUpdate, MetaSqlDelete, method.String())
+func (f *functions) Directive(method types.Object) (directive string, err error) {
+	directive, _, err = f.subjectMeta(method)
+	if err != nil {
+		return
 	}
 
-	if len(metaGroups) == 1 {
-		if metaGroups[MetaSqlSelect] == nil {
-			return
-		}
-		selectMetaGroup := metaGroups[MetaSqlSelect]
+	if len(directive) > 0 {
+		return
+	}
+
+	subject, err := f.ruleParser.ParseSubject(method.Name())
+	if err != nil {
+		return "", err
+	}
+	switch subject {
+	case query.SubjectFind, query.SubjectCount, query.SubjectExists:
+		directive = MetaSqlSelect
+	case query.SubjectDelete:
+		directive = MetaSqlDelete
+	}
+	return
+}
+
+func (f *functions) SelectMeta(tableMeta *Table, method types.Object) (selectMeta *Select, err error) {
+	directive, selectMetaGroup, err := f.subjectMeta(method)
+	if err != nil {
+		return
+	}
+
+	if len(directive) > 0 && directive != MetaSqlSelect {
+		return
+	}
+
+	if selectMetaGroup != nil {
 		originSelectMeta := selectMetaGroup[0].(*Select)
 		if len(originSelectMeta.Query) > 0 {
 			selectMeta = originSelectMeta
@@ -74,7 +97,9 @@ func (f *functions) SelectMeta(tableMeta *Table, method types.Object) (selectMet
 	parsedQuery, err := f.ruleParser.Parse(method.Name())
 
 	if parsedQuery == nil ||
-		(parsedQuery.Subject() != query.SubjectFind && parsedQuery.Subject() != query.SubjectCount) {
+		(parsedQuery.Subject() != query.SubjectFind &&
+			parsedQuery.Subject() != query.SubjectCount &&
+			parsedQuery.Subject() != query.SubjectExists) {
 		if selectMeta != nil {
 			err = fmt.Errorf("can not parse method to query,method=%s, possible reasons is %w",
 				method.String(), err)
@@ -91,7 +116,10 @@ func (f *functions) SelectMeta(tableMeta *Table, method types.Object) (selectMet
 		for _, param := range otherParams {
 			namedArgs = append(namedArgs, param.Name())
 		}
-		parsedQuery.FilterGroup().FillNamedArgs(namedArgs)
+		err = parsedQuery.FilterGroup().FillNamedArgs(namedArgs)
+		if err != nil {
+			return
+		}
 	}
 
 	sql, err := f.translateQuery(tableMeta, parsedQuery)
@@ -329,5 +357,19 @@ func (f *functions) compileNamedQuery(namedQuery, dialect string) (query string,
 		return
 	}
 	query, names, err = sqlx.CompileNamedQuery([]byte(namedQuery), bindType)
+	return
+}
+
+func (f *functions) subjectMeta(method types.Object) (directive string, group meta.Group, err error) {
+	metaGroups := f.metaParser.ObjectMetaGroups(method, Directives...)
+	if len(metaGroups) > 1 {
+		err = fmt.Errorf("method can not use multiple %v,method=%s", Directives, method.String())
+	} else if len(metaGroups) == 1 {
+		for k, v := range metaGroups {
+			directive = k
+			group = v
+			break
+		}
+	}
 	return
 }

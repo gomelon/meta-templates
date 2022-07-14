@@ -29,17 +29,36 @@ type User struct {
 //UserDao 用户信息Dao
 //sql:table name=`user` dialect="mysql"
 type UserDao interface {
-	//FindById 通过ID获取用户信息
-	/*sql:select query="select * from `user` where id = :id" master*/
 	FindById(ctx context.Context, id int64) (*User, error)
+
+	FindByBirthdayGTE(ctx context.Context /*sql:param ctx*/, time time.Time) ([]*User, error)
+
+	ExistsById(ctx context.Context, id int64) (bool, error)
+
+	CountByBirthdayGTE(ctx context.Context /*sql:param ctx*/, time time.Time) (int, error)
+
+	/*sql:select query="select * from `user` where id = :id" master*/
+	FindById2(ctx context.Context, id int64) (*User, error)
+
 	/*sql:select query="select * from `user` where birthday >= :time"*/
-	FindByBirthdayGte(ctx context.Context /*sql:param ctx*/, time time.Time) ([]*User, error)
+	FindByBirthdayGTE2(ctx context.Context /*sql:param ctx*/, time time.Time) ([]*User, error)
+
+	/*sql:select query="select 1 as X from `user` WHERE id = :id limit 1"*/
+	ExistsById2(ctx context.Context, id int64) (bool, error)
+
 	/*sql:select query="select count(*) as count from `user` where birthday >= :time"*/
-	CountByBirthdayGte(ctx context.Context /*sql:param ctx*/, time time.Time) (int32, error)
-	//FindByName 通过用户名获取用户信息
-	FindByName(ctx context.Context, name string) (*User, error)
+	CountByBirthdayGTE2(ctx context.Context /*sql:param ctx*/, time time.Time) (int, error)
+
+	//Insert
+	//sql:none
 	Insert(ctx context.Context, user *User) (*User, error)
+
+	//UpdateById
+	//sql:none
 	UpdateById(ctx context.Context, id int64, user *User) (int64, error)
+
+	//DeleteById
+	//sql:none
 	DeleteById(ctx context.Context, id int64) (int64, error)
 }
 
